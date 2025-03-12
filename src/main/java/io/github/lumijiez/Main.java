@@ -330,10 +330,86 @@ public class Main {
             if (contentType.contains("application/json")) {
                 return formatJson(body);
             } else if (contentType.contains("text/html")) {
-                return cleanHtml(body);
+                return extractReadableTextFromHtml(body);
             } else {
                 return body;
             }
+        }
+
+        private String extractReadableTextFromHtml(String html) {
+            // Remove script tags and their content
+            String noScripts = html.replaceAll("<script[^>]*>[\\s\\S]*?</script>", "");
+
+            // Remove style tags and their content
+            String noStyles = noScripts.replaceAll("<style[^>]*>[\\s\\S]*?</style>", "");
+
+            // Extract text from specific readable elements (add more as needed)
+            StringBuilder result = new StringBuilder();
+
+            // Extract title
+            Pattern titlePattern = Pattern.compile("<title[^>]*>(.*?)</title>", Pattern.DOTALL);
+            Matcher titleMatcher = titlePattern.matcher(noStyles);
+            if (titleMatcher.find()) {
+                result.append("Title: ").append(cleanHtml(titleMatcher.group(1))).append("\n\n");
+            }
+
+            // Extract text from paragraph tags
+            Pattern pPattern = Pattern.compile("<p[^>]*>(.*?)</p>", Pattern.DOTALL);
+            Matcher pMatcher = pPattern.matcher(noStyles);
+            while (pMatcher.find()) {
+                String paragraph = cleanHtml(pMatcher.group(1));
+                if (!paragraph.isBlank()) {
+                    result.append(paragraph).append("\n\n");
+                }
+            }
+
+            // Extract text from heading tags (h1-h6)
+            for (int i = 1; i <= 6; i++) {
+                Pattern hPattern = Pattern.compile("<h" + i + "[^>]*>(.*?)</h" + i + ">", Pattern.DOTALL);
+                Matcher hMatcher = hPattern.matcher(noStyles);
+                while (hMatcher.find()) {
+                    String heading = cleanHtml(hMatcher.group(1));
+                    if (!heading.isBlank()) {
+                        result.append(heading).append("\n\n");
+                    }
+                }
+            }
+
+            // Extract text from list items
+            Pattern liPattern = Pattern.compile("<li[^>]*>(.*?)</li>", Pattern.DOTALL);
+            Matcher liMatcher = liPattern.matcher(noStyles);
+            while (liMatcher.find()) {
+                String item = cleanHtml(liMatcher.group(1));
+                if (!item.isBlank()) {
+                    result.append("• ").append(item).append("\n");
+                }
+            }
+
+            // Extract text from divs (can contain important content)
+            Pattern divPattern = Pattern.compile("<div[^>]*>(.*?)</div>", Pattern.DOTALL);
+            Matcher divMatcher = divPattern.matcher(noStyles);
+            Set<String> processedDivs = new HashSet<>();
+            while (divMatcher.find()) {
+                String divContent = divMatcher.group(1);
+                // Skip divs that just contain other divs to avoid duplication
+                if (!divContent.contains("<div") && !divContent.isBlank()) {
+                    String cleanedDiv = cleanHtml(divContent);
+                    if (!cleanedDiv.isBlank() && !processedDivs.contains(cleanedDiv)) {
+                        processedDivs.add(cleanedDiv);
+                        result.append(cleanedDiv).append("\n\n");
+                    }
+                }
+            }
+
+            // Get any remaining plain text
+            String cleanedHtml = cleanHtml(noStyles);
+
+            // If we didn't extract anything usable, fall back to the general cleaning
+            if (result.length() < 100 && !cleanedHtml.isBlank()) {
+                return cleanedHtml;
+            }
+
+            return result.toString().trim();
         }
 
         private String formatJson(String json) {
