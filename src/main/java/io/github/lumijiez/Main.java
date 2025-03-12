@@ -5,10 +5,16 @@ import javax.net.ssl.SSLSocketFactory;
 import java.io.*;
 import java.net.Socket;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main {
     private static final int HTTP_PORT = 80;
@@ -75,6 +81,54 @@ public class Main {
         HttpResponse response = fetchUrl(url, 0);
         if (response != null) {
             System.out.println(response.getReadableContent());
+        }
+    }
+
+    private static void performSearch(String searchTerm) throws IOException, NoSuchAlgorithmException, KeyManagementException {
+        String encodedTerm = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
+        String searchUrl = "https://duckduckgo.com/html/?q=" + encodedTerm;
+
+        HttpResponse response = fetchUrl(searchUrl, 0);
+
+        if (response.statusCode() == 200) {
+            List<SearchResult> results = extractSearchResults(response.body());
+
+            System.out.println("Search results for: " + searchTerm);
+            System.out.println("------------------------------------");
+
+            int count = 0;
+            for (SearchResult result : results) {
+                count++;
+                System.out.println(count + ". " + result.title);
+                System.out.println("   " + result.url);
+                System.out.println("   " + result.description);
+                System.out.println();
+
+                if (count >= 10) {
+                    break;
+                }
+            }
+
+            Scanner scanner = new Scanner(System.in);
+            System.out.println("Enter a number to open the result (1-10), or 'q' to quit:");
+            String input = scanner.nextLine().trim();
+
+            if (!input.equalsIgnoreCase("q")) {
+                try {
+                    int resultNum = Integer.parseInt(input);
+                    if (resultNum >= 1 && resultNum <= Math.min(10, results.size())) {
+                        SearchResult selectedResult = results.get(resultNum - 1);
+                        System.out.println("Fetching: " + selectedResult.url);
+                        fetchAndPrintUrl(selectedResult.url);
+                    } else {
+                        System.out.println("Invalid result number");
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid input");
+                }
+            }
+        } else {
+            System.err.println("Search failed with status code: " + response.statusCode());
         }
     }
 
@@ -147,6 +201,45 @@ public class Main {
         return response;
     }
 
+    private static HttpResponse parseResponse(String responseStr) {
+        int headerEnd = responseStr.indexOf("\r\n\r\n");
+        if (headerEnd == -1) {
+            headerEnd = responseStr.indexOf("\n\n");
+        }
+
+        if (headerEnd == -1) {
+            return new HttpResponse(500, new HashMap<>(), "Invalid response from server");
+        }
+
+        String headersStr = responseStr.substring(0, headerEnd);
+        String body = headerEnd + 4 <= responseStr.length() ? responseStr.substring(headerEnd + 4) : "";
+
+        String[] headerLines = headersStr.split("\r\n|\n");
+        String statusLine = headerLines[0];
+
+        Pattern statusPattern = Pattern.compile("HTTP/\\d\\.\\d\\s+(\\d+)\\s+(.*)");
+        Matcher statusMatcher = statusPattern.matcher(statusLine);
+
+        if (!statusMatcher.matches()) {
+            return new HttpResponse(500, new HashMap<>(), "Invalid status line: " + statusLine);
+        }
+
+        int statusCode = Integer.parseInt(statusMatcher.group(1));
+        Map<String, String> headers = new HashMap<>();
+
+        for (int i = 1; i < headerLines.length; i++) {
+            String line = headerLines[i];
+            int colonIndex = line.indexOf(':');
+            if (colonIndex != -1) {
+                String key = line.substring(0, colonIndex).trim();
+                String value = line.substring(colonIndex + 1).trim();
+                headers.put(key, value);
+            }
+        }
+
+        return new HttpResponse(statusCode, headers, body);
+    }
+
     private record HttpResponse(int statusCode, Map<String, String> headers, String body) implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
@@ -192,5 +285,10 @@ public class Main {
 
             return formatted.toString();
         }
+    }
+
+    private record SearchResult(String title, String url, String description) implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
     }
 }
