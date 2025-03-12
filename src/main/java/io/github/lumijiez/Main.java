@@ -266,7 +266,11 @@ public class Main {
                     if (resultNum >= 1 && resultNum <= Math.min(10, results.size())) {
                         SearchResult selectedResult = results.get(resultNum - 1);
                         System.out.println("Fetching: " + selectedResult.url);
-                        fetchAndPrintUrl(selectedResult.url);
+
+                        HttpResponse selectedResponse = fetchUrl(selectedResult.url, 0);
+                        if (selectedResponse != null) {
+                            System.out.println(extractReadableTextFromHtml(selectedResponse.body));
+                        }
                     } else {
                         System.out.println("Invalid result number");
                     }
@@ -295,10 +299,23 @@ public class Main {
                 url = extractRedirectUrl(url);
             }
 
+            url = cleanUrl(url);
+
             results.add(new SearchResult(title, url, description));
         }
 
         return results;
+    }
+
+    private static String cleanUrl(String url) {
+        url = decodeHtmlEntities(url);
+
+        int ampRutIndex = url.indexOf("&rut=");
+        if (ampRutIndex != -1) {
+            url = url.substring(0, ampRutIndex);
+        }
+
+        return url;
     }
 
     private static String extractRedirectUrl(String url) {
@@ -311,13 +328,90 @@ public class Main {
     }
 
     private static String cleanHtml(String html) {
-        return html.replaceAll("<[^>]*>", "")
-                .replaceAll("&quot;", "\"")
-                .replaceAll("&amp;", "&")
-                .replaceAll("&lt;", "<")
-                .replaceAll("&gt;", ">")
-                .replaceAll("&nbsp;", " ")
-                .trim();
+        String noTags = html.replaceAll("<[^>]*>", "");
+
+        return decodeHtmlEntities(noTags).trim();
+    }
+
+    private static String decodeHtmlEntities(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        Pattern decimalPattern = Pattern.compile("&#(\\d+);");
+        Matcher decimalMatcher = decimalPattern.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (decimalMatcher.find()) {
+            String replacement = String.valueOf((char) Integer.parseInt(decimalMatcher.group(1)));
+            decimalMatcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        decimalMatcher.appendTail(sb);
+        text = sb.toString();
+
+        Pattern hexPattern = Pattern.compile("&#x([0-9a-fA-F]+);");
+        Matcher hexMatcher = hexPattern.matcher(text);
+        sb = new StringBuffer();
+        while (hexMatcher.find()) {
+            String replacement = String.valueOf((char) Integer.parseInt(hexMatcher.group(1), 16));
+            hexMatcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        hexMatcher.appendTail(sb);
+        text = sb.toString();
+
+        Map<String, String> entities = new HashMap<>();
+        entities.put("&quot;", "\"");
+        entities.put("&amp;", "&");
+        entities.put("&lt;", "<");
+        entities.put("&gt;", ">");
+        entities.put("&nbsp;", " ");
+        entities.put("&apos;", "'");
+        entities.put("&rsquo;", "'");
+        entities.put("&lsquo;", "'");
+        entities.put("&rdquo;", "\"");
+        entities.put("&ldquo;", "\"");
+        entities.put("&ndash;", "–");
+        entities.put("&mdash;", "—");
+        entities.put("&euro;", "€");
+        entities.put("&pound;", "£");
+        entities.put("&yen;", "¥");
+        entities.put("&copy;", "©");
+        entities.put("&reg;", "®");
+        entities.put("&trade;", "™");
+        entities.put("&agrave;", "à");
+        entities.put("&aacute;", "á");
+        entities.put("&acirc;", "â");
+        entities.put("&atilde;", "ã");
+        entities.put("&auml;", "ä");
+        entities.put("&aring;", "å");
+        entities.put("&aelig;", "æ");
+        entities.put("&ccedil;", "ç");
+        entities.put("&egrave;", "è");
+        entities.put("&eacute;", "é");
+        entities.put("&ecirc;", "ê");
+        entities.put("&euml;", "ë");
+        entities.put("&igrave;", "ì");
+        entities.put("&iacute;", "í");
+        entities.put("&icirc;", "î");
+        entities.put("&iuml;", "ï");
+        entities.put("&ntilde;", "ñ");
+        entities.put("&ograve;", "ò");
+        entities.put("&oacute;", "ó");
+        entities.put("&ocirc;", "ô");
+        entities.put("&otilde;", "õ");
+        entities.put("&ouml;", "ö");
+        entities.put("&oslash;", "ø");
+        entities.put("&szlig;", "ß");
+        entities.put("&ugrave;", "ù");
+        entities.put("&uacute;", "ú");
+        entities.put("&ucirc;", "û");
+        entities.put("&uuml;", "ü");
+        entities.put("&yuml;", "ÿ");
+
+        for (Map.Entry<String, String> entry : entities.entrySet()) {
+            text = text.replace(entry.getKey(), entry.getValue());
+        }
+
+        return text;
     }
 
     private record HttpResponse(int statusCode, Map<String, String> headers, String body) implements Serializable {
@@ -466,5 +560,154 @@ public class Main {
     private record SearchResult(String title, String url, String description) implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
+    }
+
+    private static void extractContentFromTags(String content, StringBuilder result) {
+        for (int i = 1; i <= 6; i++) {
+            Pattern hPattern = Pattern.compile("<h" + i + "[^>]*>(.*?)</h" + i + ">", Pattern.DOTALL);
+            Matcher hMatcher = hPattern.matcher(content);
+            while (hMatcher.find()) {
+                String heading = cleanHtml(hMatcher.group(1));
+                if (!heading.isBlank()) {
+                    result.append(heading).append("\n\n");
+                }
+            }
+        }
+
+        Pattern pPattern = Pattern.compile("<p[^>]*>(.*?)</p>", Pattern.DOTALL);
+        Matcher pMatcher = pPattern.matcher(content);
+        while (pMatcher.find()) {
+            String paragraph = cleanHtml(pMatcher.group(1));
+            if (!paragraph.isBlank()) {
+                result.append(paragraph).append("\n\n");
+            }
+        }
+
+        Pattern liPattern = Pattern.compile("<li[^>]*>(.*?)</li>", Pattern.DOTALL);
+        Matcher liMatcher = liPattern.matcher(content);
+        while (liMatcher.find()) {
+            String item = cleanHtml(liMatcher.group(1));
+            if (!item.isBlank()) {
+                result.append("• ").append(item).append("\n");
+            }
+        }
+
+        Pattern divPattern = Pattern.compile("<div[^>]*class=[\"'](?:content|main|article|text|body)[^\"']*[\"'][^>]*>(.*?)</div>", Pattern.DOTALL);
+        Matcher divMatcher = divPattern.matcher(content);
+        Set<String> processedDivs = new HashSet<>();
+        while (divMatcher.find()) {
+            String divContent = divMatcher.group(1);
+            if (!divContent.contains("<div") && !divContent.isBlank()) {
+                String cleanedDiv = cleanHtml(divContent);
+                if (!cleanedDiv.isBlank() && !processedDivs.contains(cleanedDiv)) {
+                    processedDivs.add(cleanedDiv);
+                    result.append(cleanedDiv).append("\n\n");
+                }
+            }
+        }
+
+        if (result.length() < 200) {
+            divPattern = Pattern.compile("<div[^>]*>(.*?)</div>", Pattern.DOTALL);
+            divMatcher = divPattern.matcher(content);
+            while (divMatcher.find()) {
+                String divContent = divMatcher.group(1);
+                if (!divContent.contains("<div") && !divContent.isBlank()) {
+                    String cleanedDiv = cleanHtml(divContent);
+                    if (!cleanedDiv.isBlank() && !processedDivs.contains(cleanedDiv) && cleanedDiv.length() > 50) {
+                        processedDivs.add(cleanedDiv);
+                        result.append(cleanedDiv).append("\n\n");
+                    }
+                }
+            }
+        }
+
+        Pattern spanPattern = Pattern.compile("<span[^>]*>(.*?)</span>", Pattern.DOTALL);
+        Matcher spanMatcher = spanPattern.matcher(content);
+        Set<String> processedSpans = new HashSet<>();
+        while (spanMatcher.find()) {
+            String spanContent = spanMatcher.group(1);
+            if (!spanContent.isBlank() && !spanContent.contains("<")) {
+                String cleanedSpan = cleanHtml(spanContent);
+                if (!cleanedSpan.isBlank() && !processedSpans.contains(cleanedSpan) && cleanedSpan.length() > 50) {
+                    processedSpans.add(cleanedSpan);
+                    result.append(cleanedSpan).append("\n\n");
+                }
+            }
+        }
+    }
+
+    private static String extractReadableTextFromHtml(String html) {
+        String noScripts = html.replaceAll("<script[^>]*>[\\s\\S]*?</script>", "");
+
+        String noStyles = noScripts.replaceAll("<style[^>]*>[\\s\\S]*?</style>", "");
+
+        noStyles = noStyles.replaceAll("<head[^>]*>[\\s\\S]*?</head>", "");
+
+        noStyles = noStyles.replaceAll("<meta[^>]*>", "");
+
+        noStyles = noStyles.replaceAll("<link[^>]*>", "");
+
+        noStyles = noStyles.replaceAll("<iframe[^>]*>[\\s\\S]*?</iframe>", "");
+
+        noStyles = noStyles.replaceAll("<form[^>]*>[\\s\\S]*?</form>", "");
+
+        noStyles = noStyles.replaceAll("<svg[^>]*>[\\s\\S]*?</svg>", "");
+
+        noStyles = noStyles.replaceAll("<nav[^>]*>[\\s\\S]*?</nav>", "");
+
+        noStyles = noStyles.replaceAll("<header[^>]*>[\\s\\S]*?</header>", "");
+
+        noStyles = noStyles.replaceAll("<footer[^>]*>[\\s\\S]*?</footer>", "");
+
+        StringBuilder result = new StringBuilder();
+
+        Pattern titlePattern = Pattern.compile("<title[^>]*>(.*?)</title>", Pattern.DOTALL);
+        Matcher titleMatcher = titlePattern.matcher(noStyles);
+        if (titleMatcher.find()) {
+            result.append("Title: ").append(cleanHtml(titleMatcher.group(1))).append("\n\n");
+        }
+
+        Pattern articlePattern = Pattern.compile("<article[^>]*>(.*?)</article>", Pattern.DOTALL);
+        Matcher articleMatcher = articlePattern.matcher(noStyles);
+        boolean foundArticle = false;
+        while (articleMatcher.find()) {
+            foundArticle = true;
+            String articleContent = articleMatcher.group(1);
+            extractContentFromTags(articleContent, result);
+        }
+
+        if (!foundArticle) {
+            Pattern mainPattern = Pattern.compile("<main[^>]*>(.*?)</main>", Pattern.DOTALL);
+            Matcher mainMatcher = mainPattern.matcher(noStyles);
+            boolean foundMain = false;
+            while (mainMatcher.find()) {
+                foundMain = true;
+                String mainContent = mainMatcher.group(1);
+                extractContentFromTags(mainContent, result);
+            }
+
+            if (!foundMain) {
+                Pattern bodyPattern = Pattern.compile("<body[^>]*>(.*?)</body>", Pattern.DOTALL);
+                Matcher bodyMatcher = bodyPattern.matcher(noStyles);
+                if (bodyMatcher.find()) {
+                    String bodyContent = bodyMatcher.group(1);
+                    extractContentFromTags(bodyContent, result);
+                } else {
+                    extractContentFromTags(noStyles, result);
+                }
+            }
+        }
+
+        if (result.length() < 200) {
+            String plainText = noStyles.replaceAll("<[^>]*>", " ")
+                    .replaceAll("\\s+", " ")
+                    .trim();
+
+            if (!plainText.isEmpty()) {
+                result.append(plainText);
+            }
+        }
+
+        return result.toString().trim();
     }
 }
