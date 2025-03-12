@@ -193,4 +193,9 @@ public class Main {
             return formatted.toString();
         }
     }
+
+    private record SearchResult(String title, String url, String description) implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+    }
 }
