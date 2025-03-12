@@ -9,9 +9,12 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Main {
     private static final int HTTP_PORT = 80;
@@ -196,6 +199,45 @@ public class Main {
 
         cache.put(url, new CacheEntry(response));
         return response;
+    }
+
+    private static HttpResponse parseResponse(String responseStr) {
+        int headerEnd = responseStr.indexOf("\r\n\r\n");
+        if (headerEnd == -1) {
+            headerEnd = responseStr.indexOf("\n\n");
+        }
+
+        if (headerEnd == -1) {
+            return new HttpResponse(500, new HashMap<>(), "Invalid response from server");
+        }
+
+        String headersStr = responseStr.substring(0, headerEnd);
+        String body = headerEnd + 4 <= responseStr.length() ? responseStr.substring(headerEnd + 4) : "";
+
+        String[] headerLines = headersStr.split("\r\n|\n");
+        String statusLine = headerLines[0];
+
+        Pattern statusPattern = Pattern.compile("HTTP/\\d\\.\\d\\s+(\\d+)\\s+(.*)");
+        Matcher statusMatcher = statusPattern.matcher(statusLine);
+
+        if (!statusMatcher.matches()) {
+            return new HttpResponse(500, new HashMap<>(), "Invalid status line: " + statusLine);
+        }
+
+        int statusCode = Integer.parseInt(statusMatcher.group(1));
+        Map<String, String> headers = new HashMap<>();
+
+        for (int i = 1; i < headerLines.length; i++) {
+            String line = headerLines[i];
+            int colonIndex = line.indexOf(':');
+            if (colonIndex != -1) {
+                String key = line.substring(0, colonIndex).trim();
+                String value = line.substring(colonIndex + 1).trim();
+                headers.put(key, value);
+            }
+        }
+
+        return new HttpResponse(statusCode, headers, body);
     }
 
     private record HttpResponse(int statusCode, Map<String, String> headers, String body) implements Serializable {
