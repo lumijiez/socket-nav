@@ -5,10 +5,13 @@ import javax.net.ssl.SSLSocketFactory;
 import java.io.*;
 import java.net.Socket;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 
 public class Main {
     private static final int HTTP_PORT = 80;
@@ -75,6 +78,54 @@ public class Main {
         HttpResponse response = fetchUrl(url, 0);
         if (response != null) {
             System.out.println(response.getReadableContent());
+        }
+    }
+
+    private static void performSearch(String searchTerm) throws IOException, NoSuchAlgorithmException, KeyManagementException {
+        String encodedTerm = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
+        String searchUrl = "https://duckduckgo.com/html/?q=" + encodedTerm;
+
+        HttpResponse response = fetchUrl(searchUrl, 0);
+
+        if (response.statusCode() == 200) {
+            List<SearchResult> results = extractSearchResults(response.body());
+
+            System.out.println("Search results for: " + searchTerm);
+            System.out.println("------------------------------------");
+
+            int count = 0;
+            for (SearchResult result : results) {
+                count++;
+                System.out.println(count + ". " + result.title);
+                System.out.println("   " + result.url);
+                System.out.println("   " + result.description);
+                System.out.println();
+
+                if (count >= 10) {
+                    break;
+                }
+            }
+
+            Scanner scanner = new Scanner(System.in);
+            System.out.println("Enter a number to open the result (1-10), or 'q' to quit:");
+            String input = scanner.nextLine().trim();
+
+            if (!input.equalsIgnoreCase("q")) {
+                try {
+                    int resultNum = Integer.parseInt(input);
+                    if (resultNum >= 1 && resultNum <= Math.min(10, results.size())) {
+                        SearchResult selectedResult = results.get(resultNum - 1);
+                        System.out.println("Fetching: " + selectedResult.url);
+                        fetchAndPrintUrl(selectedResult.url);
+                    } else {
+                        System.out.println("Invalid result number");
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid input");
+                }
+            }
+        } else {
+            System.err.println("Search failed with status code: " + response.statusCode());
         }
     }
 
