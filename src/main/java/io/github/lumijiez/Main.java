@@ -1,29 +1,26 @@
 package io.github.lumijiez;
 
-import javax.net.ssl.*;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
 import java.io.*;
-import java.net.*;
+import java.net.Socket;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Main {
     private static final int HTTP_PORT = 80;
     private static final int HTTPS_PORT = 443;
-    private static final int MAX_REDIRECTS = 5;
-    private static Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
     private static final String USER_AGENT = "Go2Web/1.0";
-    private static final long CACHE_EXPIRY_TIME = TimeUnit.MINUTES.toMillis(5);
-    private static final String CACHE_FILE = "go2web_cache.ser";
-
     public static void main(String[] args) {
-        loadCacheFromFile();
-
         if (args.length < 1) {
             printHelp();
             return;
@@ -31,36 +28,9 @@ public class Main {
 
         try {
             processArgs(args);
-            saveCacheToFile();
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             System.exit(1);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void loadCacheFromFile() {
-        File cacheFile = new File(CACHE_FILE);
-        if (cacheFile.exists()) {
-            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(cacheFile))) {
-                cache = (ConcurrentHashMap<String, CacheEntry>) ois.readObject();
-
-                cache.entrySet().removeIf(stringCacheEntryEntry -> stringCacheEntryEntry.getValue().isExpired());
-
-                System.out.println("Cache loaded from file with " + cache.size() + " entries");
-            } catch (Exception e) {
-                System.err.println("Error loading cache from file: " + e.getMessage());
-                cache = new ConcurrentHashMap<>();
-            }
-        }
-    }
-
-    private static void saveCacheToFile() {
-        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(CACHE_FILE))) {
-            oos.writeObject(cache);
-            System.out.println("Cache saved to file with " + cache.size() + " entries");
-        } catch (Exception e) {
-            System.err.println("Error saving cache to file: " + e.getMessage());
         }
     }
 
@@ -114,17 +84,56 @@ public class Main {
         }
     }
 
+    private static void performSearch(String searchTerm) throws IOException, NoSuchAlgorithmException, KeyManagementException {
+        String encodedTerm = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
+        String searchUrl = "https://duckduckgo.com/html/?q=" + encodedTerm;
+
+        HttpResponse response = fetchUrl(searchUrl, 0);
+
+        if (response.statusCode() == 200) {
+            List<SearchResult> results = extractSearchResults(response.body());
+
+            System.out.println("Search results for: " + searchTerm);
+            System.out.println("------------------------------------");
+
+            int count = 0;
+            for (SearchResult result : results) {
+                count++;
+                System.out.println(count + ". " + result.title);
+                System.out.println("   " + result.url);
+                System.out.println("   " + result.description);
+                System.out.println();
+
+                if (count >= 10) {
+                    break;
+                }
+            }
+
+            Scanner scanner = new Scanner(System.in);
+            System.out.println("Enter a number to open the result (1-10), or 'q' to quit:");
+            String input = scanner.nextLine().trim();
+
+            if (!input.equalsIgnoreCase("q")) {
+                try {
+                    int resultNum = Integer.parseInt(input);
+                    if (resultNum >= 1 && resultNum <= Math.min(10, results.size())) {
+                        SearchResult selectedResult = results.get(resultNum - 1);
+                        System.out.println("Fetching: " + selectedResult.url);
+                        fetchAndPrintUrl(selectedResult.url);
+                    } else {
+                        System.out.println("Invalid result number");
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid input");
+                }
+            }
+        } else {
+            System.err.println("Search failed with status code: " + response.statusCode());
+        }
+    }
+
     private static HttpResponse fetchUrl(String url, int redirectCount)
             throws IOException, NoSuchAlgorithmException, KeyManagementException {
-        if (redirectCount > MAX_REDIRECTS) {
-            throw new IOException("Too many redirects");
-        }
-
-        CacheEntry cachedResponse = cache.get(url);
-        if (cachedResponse != null && !cachedResponse.isExpired()) {
-            System.out.println("CACHE HIT FOUND AND LOADED!");
-            return cachedResponse.getResponse();
-        }
 
         @SuppressWarnings("deprecation")
         URL urlObj = new URL(url);
@@ -231,95 +240,6 @@ public class Main {
         return new HttpResponse(statusCode, headers, body);
     }
 
-    private static void performSearch(String searchTerm) throws IOException, NoSuchAlgorithmException, KeyManagementException {
-        String encodedTerm = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
-        String searchUrl = "https://duckduckgo.com/html/?q=" + encodedTerm;
-
-        HttpResponse response = fetchUrl(searchUrl, 0);
-
-        if (response.statusCode() == 200) {
-            List<SearchResult> results = extractSearchResults(response.body());
-
-            System.out.println("Search results for: " + searchTerm);
-            System.out.println("------------------------------------");
-
-            int count = 0;
-            for (SearchResult result : results) {
-                count++;
-                System.out.println(count + ". " + result.title);
-                System.out.println("   " + result.url);
-                System.out.println("   " + result.description);
-                System.out.println();
-
-                if (count >= 10) {
-                    break;
-                }
-            }
-
-            Scanner scanner = new Scanner(System.in);
-            System.out.println("Enter a number to open the result (1-10), or 'q' to quit:");
-            String input = scanner.nextLine().trim();
-
-            if (!input.equalsIgnoreCase("q")) {
-                try {
-                    int resultNum = Integer.parseInt(input);
-                    if (resultNum >= 1 && resultNum <= Math.min(10, results.size())) {
-                        SearchResult selectedResult = results.get(resultNum - 1);
-                        System.out.println("Fetching: " + selectedResult.url);
-                        fetchAndPrintUrl(selectedResult.url);
-                    } else {
-                        System.out.println("Invalid result number");
-                    }
-                } catch (NumberFormatException e) {
-                    System.out.println("Invalid input");
-                }
-            }
-        } else {
-            System.err.println("Search failed with status code: " + response.statusCode());
-        }
-    }
-
-    private static List<SearchResult> extractSearchResults(String html) {
-        List<SearchResult> results = new ArrayList<>();
-
-        Pattern pattern = Pattern.compile("<h2 class=\"result__title\">.*?<a.*?href=\"(.*?)\".*?>(.*?)</a>.*?<a.*?class=\"result__snippet\".*?>(.*?)</a>",
-                Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(html);
-
-        while (matcher.find()) {
-            String url = matcher.group(1);
-            String title = cleanHtml(matcher.group(2));
-            String description = cleanHtml(matcher.group(3));
-
-            if (url.startsWith("//duckduckgo.com/l/?uddg=")) {
-                url = extractRedirectUrl(url);
-            }
-
-            results.add(new SearchResult(title, url, description));
-        }
-
-        return results;
-    }
-
-    private static String extractRedirectUrl(String url) {
-        if (url.contains("uddg=")) {
-            int start = url.indexOf("uddg=") + 5;
-            String encodedUrl = url.substring(start);
-            return URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8);
-        }
-        return url;
-    }
-
-    private static String cleanHtml(String html) {
-        return html.replaceAll("<[^>]*>", "")
-                .replaceAll("&quot;", "\"")
-                .replaceAll("&amp;", "&")
-                .replaceAll("&lt;", "<")
-                .replaceAll("&gt;", ">")
-                .replaceAll("&nbsp;", " ")
-                .trim();
-    }
-
     private record HttpResponse(int statusCode, Map<String, String> headers, String body) implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
@@ -364,26 +284,6 @@ public class Main {
             }
 
             return formatted.toString();
-        }
-    }
-
-    private static class CacheEntry implements Serializable {
-        @Serial
-        private static final long serialVersionUID = 1L;
-        private final HttpResponse response;
-        private final long expiryTime;
-
-        public CacheEntry(HttpResponse response) {
-            this.response = response;
-            this.expiryTime = System.currentTimeMillis() + CACHE_EXPIRY_TIME;
-        }
-
-        public HttpResponse getResponse() {
-            return response;
-        }
-
-        public boolean isExpired() {
-            return System.currentTimeMillis() > expiryTime;
         }
     }
 
