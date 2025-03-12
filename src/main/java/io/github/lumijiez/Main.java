@@ -110,7 +110,7 @@ public class Main {
     private static void fetchAndPrintUrl(String url) throws IOException, NoSuchAlgorithmException, KeyManagementException {
         HttpResponse response = fetchUrl(url, 0);
         if (response != null) {
-            System.out.println(response.getReadableContent());
+            System.out.println(extractReadableTextFromHtml(response.getReadableContent()));
         }
     }
 
@@ -340,7 +340,7 @@ public class Main {
 
         Pattern decimalPattern = Pattern.compile("&#(\\d+);");
         Matcher decimalMatcher = decimalPattern.matcher(text);
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         while (decimalMatcher.find()) {
             String replacement = String.valueOf((char) Integer.parseInt(decimalMatcher.group(1)));
             decimalMatcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
@@ -350,7 +350,7 @@ public class Main {
 
         Pattern hexPattern = Pattern.compile("&#x([0-9a-fA-F]+);");
         Matcher hexMatcher = hexPattern.matcher(text);
-        sb = new StringBuffer();
+        sb = new StringBuilder();
         while (hexMatcher.find()) {
             String replacement = String.valueOf((char) Integer.parseInt(hexMatcher.group(1), 16));
             hexMatcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
